@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 import os
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -705,6 +706,14 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         raise HTTPException(status_code=400, detail="Proto content is required")
     
     try:
+        import grpc
+        from google.protobuf import descriptor_pb2
+        from google.protobuf.descriptor_pool import DescriptorPool
+        from google.protobuf.message_factory import MessageFactory
+        from google.protobuf import json_format
+        import tempfile
+        import os as os_module
+        
         # Save proto content to a temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.proto', delete=False) as proto_file:
             proto_file.write(request.proto_content)
@@ -712,18 +721,22 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         
         # Compile the proto file to get descriptor
         descriptor_set_file = proto_file_path + '.desc'
-        proto_dir = os.path.dirname(proto_file_path)
-        compile_result = subprocess.run(
-            ['protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}', 
-             f'--include_imports', proto_file_path],
-            capture_output=True,
-            text=True
+        proto_dir = os_module.path.dirname(proto_file_path)
+        process = await asyncio.create_subprocess_exec(
+            'protoc',
+            f'--proto_path={proto_dir}',
+            f'--descriptor_set_out={descriptor_set_file}',
+            '--include_imports',
+            proto_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await process.communicate()
         
-        if compile_result.returncode != 0:
+        if process.returncode != 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Failed to compile proto file: {compile_result.stderr}"
+                detail=f"Failed to compile proto file: {stderr.decode()}"
             )
         
         # Load the descriptor
