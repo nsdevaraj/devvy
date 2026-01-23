@@ -249,7 +249,7 @@ async def validate_license(current_user: dict = Depends(get_current_user)):
     }
 
 @api_router.get("/tools/config")
-async def get_tools_config():
+async def get_tools_config(db=Depends(get_database)):
     """Get configuration of which tools are free/premium"""
     configs = await db.tool_configs.find({}, {"_id": 0}).to_list(100)
     
@@ -263,10 +263,13 @@ async def get_tools_config():
             {"tool_id": "ui-recorder", "tool_name": "UI Automation Recorder", "is_premium": False},
         ]
         
+        docs = []
         for tool_data in default_tools:
             tool_config = ToolConfig(**tool_data)
-            doc = tool_config.model_dump()
-            await db.tool_configs.insert_one(doc)
+            docs.append(tool_config.model_dump())
+
+        if docs:
+            await db.tool_configs.insert_many(docs)
         
         configs = await db.tool_configs.find({}, {"_id": 0}).to_list(100)
     
