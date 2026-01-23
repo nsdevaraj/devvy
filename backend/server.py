@@ -17,6 +17,13 @@ from auth import (
     Folder, FolderCreate, SavedItem, SavedItemCreate
 )
 from db_service import get_db
+import grpc
+from google.protobuf import descriptor_pb2
+from google.protobuf.descriptor_pool import DescriptorPool
+from google.protobuf.message_factory import MessageFactory
+from google.protobuf import json_format
+import tempfile
+import subprocess
 
 
 ROOT_DIR = Path(__file__).parent
@@ -697,15 +704,6 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         raise HTTPException(status_code=400, detail="Proto content is required")
     
     try:
-        import grpc
-        from google.protobuf import descriptor_pb2
-        from google.protobuf.descriptor_pool import DescriptorPool
-        from google.protobuf.message_factory import MessageFactory
-        from google.protobuf import json_format
-        import tempfile
-        import subprocess
-        import os as os_module
-        
         # Save proto content to a temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.proto', delete=False) as proto_file:
             proto_file.write(request.proto_content)
@@ -713,7 +711,7 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         
         # Compile the proto file to get descriptor
         descriptor_set_file = proto_file_path + '.desc'
-        proto_dir = os_module.path.dirname(proto_file_path)
+        proto_dir = os.path.dirname(proto_file_path)
         compile_result = subprocess.run(
             ['protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}', 
              f'--include_imports', proto_file_path],
@@ -792,8 +790,8 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         response_dict = json_format.MessageToDict(response, preserving_proto_field_name=True)
         
         # Clean up temporary files
-        os_module.unlink(proto_file_path)
-        os_module.unlink(descriptor_set_file)
+        os.unlink(proto_file_path)
+        os.unlink(descriptor_set_file)
         
         channel.close()
         
