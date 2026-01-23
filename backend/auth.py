@@ -5,11 +5,33 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 import os
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 # JWT Settings
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
+
+_secret_key = None
+
+
+def get_secret_key():
+    global _secret_key
+    if _secret_key:
+        return _secret_key
+
+    secret = os.environ.get("JWT_SECRET_KEY")
+    if not secret:
+        logger.warning(
+            "JWT_SECRET_KEY is not set. Using insecure default key. "
+            "THIS IS NOT SAFE FOR PRODUCTION."
+        )
+        secret = "your-secret-key-change-in-production"
+
+    _secret_key = secret
+    return secret
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -136,12 +158,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, get_secret_key(), algorithm=ALGORITHM)
     return encoded_jwt
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         return None
