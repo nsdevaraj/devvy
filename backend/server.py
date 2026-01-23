@@ -95,7 +95,6 @@ class JSONBeautifyResponse(BaseModel):
 
 class FavoriteToolRequest(BaseModel):
     tool_id: str
-    user_id: str = "default_user"  # For now, using a default user
 
 class FavoriteTool(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -109,9 +108,9 @@ class FavoriteTool(BaseModel):
 # ========== AUTHENTICATION ROUTES ==========
 
 @api_router.post("/auth/register", response_model=Token)
-async def register(user_data: UserCreate):
+async def register(user_data: UserCreate, db = Depends(get_database)):
     # Check if user already exists
-    existing_user = await db.users.find_one({"email": user_data.email}, {"_id": 0})
+    existing_user = await db.get_user_by_email(user_data.email)
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -126,21 +125,18 @@ async def register(user_data: UserCreate):
         )
         org_doc = free_org.model_dump()
         org_doc['created_at'] = org_doc['created_at'].isoformat()
-        await db.organizations.insert_one(org_doc)
+        await db.create_organization(org_doc)
         org_id = free_org.id
     else:
         # Check if organization exists and has available licenses
-        org = await db.organizations.find_one({"id": org_id}, {"_id": 0})
+        org = await db.get_organization(org_id)
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
         if org['active_licenses'] >= org['max_licenses']:
             raise HTTPException(status_code=400, detail="No available licenses in organization")
         
         # Increment active licenses
-        await db.organizations.update_one(
-            {"id": org_id},
-            {"$inc": {"active_licenses": 1}}
-        )
+        await db.increment_org_licenses(org_id)
     
     # Create user
     user = User(
@@ -153,7 +149,7 @@ async def register(user_data: UserCreate):
     user_doc['password_hash'] = get_password_hash(user_data.password)
     user_doc['created_at'] = user_doc['created_at'].isoformat()
     
-    await db.users.insert_one(user_doc)
+    await db.create_user(user_doc)
     
     # Create access token
     access_token = create_access_token(data={"sub": user.id, "email": user.email})
@@ -170,8 +166,8 @@ async def register(user_data: UserCreate):
     )
 
 @api_router.post("/auth/login", response_model=Token)
-async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
+async def login(credentials: UserLogin, db = Depends(get_database)):
+    user = await db.get_user_by_email(credentials.email)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
@@ -636,43 +632,45 @@ async def beautify_json(request: JSONBeautifyRequest):
 
 # Favorites Management
 @api_router.post("/favorites/add")
-async def add_favorite(request: FavoriteToolRequest):
+async def add_favorite(
+    request: FavoriteToolRequest,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    user_id = current_user['id']
+    
     # Check if already exists
-    existing = await db.favorites.find_one({
-        "tool_id": request.tool_id,
-        "user_id": request.user_id
-    }, {"_id": 0})
+    if await db.has_favorite(user_id, request.tool_id):
+        return {"message": "Already in favorites", "favorite_id": "unknown"}
     
-    if existing:
-        return {"message": "Already in favorites", "favorite_id": existing["id"]}
-    
-    favorite = FavoriteTool(**request.model_dump())
-    doc = favorite.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    await db.favorites.insert_one(doc)
-    return {"message": "Added to favorites", "favorite_id": favorite.id}
+    await db.add_favorite(user_id, request.tool_id)
+    return {"message": "Added to favorites", "favorite_id": "new"}
 
 @api_router.post("/favorites/remove")
-async def remove_favorite(request: FavoriteToolRequest):
-    result = await db.favorites.delete_one({
-        "tool_id": request.tool_id,
-        "user_id": request.user_id
-    })
+async def remove_favorite(
+    request: FavoriteToolRequest,
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    user_id = current_user['id']
+
+    result = await db.remove_favorite(user_id, request.tool_id)
     
-    if result.deleted_count > 0:
+    if result:
         return {"message": "Removed from favorites"}
     else:
         return {"message": "Not found in favorites"}
 
 @api_router.get("/favorites/list")
-async def list_favorites(user_id: str = "default_user"):
-    favorites = await db.favorites.find(
-        {"user_id": user_id},
-        {"_id": 0}
-    ).to_list(1000)
+async def list_favorites(
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_database)
+):
+    user_id = current_user['id']
+
+    favorites = await db.get_favorites(user_id)
     
-    return {"favorites": [fav["tool_id"] for fav in favorites]}
+    return {"favorites": favorites}
 
 
 # ========== gRPC PROXY ENDPOINT ==========

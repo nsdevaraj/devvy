@@ -42,6 +42,10 @@ class DatabaseBase(ABC):
         pass
     
     @abstractmethod
+    async def increment_org_licenses(self, org_id: str) -> bool:
+        pass
+
+    @abstractmethod
     async def get_organizations(self) -> List[Dict[str, Any]]:
         pass
     
@@ -122,6 +126,10 @@ class DatabaseBase(ABC):
     async def remove_favorite(self, user_id: str, tool_id: str) -> bool:
         pass
     
+    @abstractmethod
+    async def has_favorite(self, user_id: str, tool_id: str) -> bool:
+        pass
+
     @abstractmethod
     async def get_favorites(self, user_id: str) -> List[str]:
         pass
