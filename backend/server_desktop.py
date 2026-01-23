@@ -176,6 +176,13 @@ class JSONBeautifyResponse(BaseModel):
     valid: bool
     error: Optional[str] = None
 
+class JSONValidatorRequest(BaseModel):
+    json_string: str
+
+class JSONValidatorResponse(BaseModel):
+    valid: bool
+    error: Optional[str] = None
+
 # License endpoints
 @app.get("/api/license/status", response_model=LicenseStatus)
 async def get_license_status():
@@ -307,6 +314,18 @@ async def beautify_json(request: JSONBeautifyRequest):
     except json.JSONDecodeError as e:
         return JSONBeautifyResponse(
             beautified=request.json_string,
+            valid=False,
+            error=str(e)
+        )
+
+@app.post("/api/validate", response_model=JSONValidatorResponse)
+async def validate_json(request: JSONValidatorRequest):
+    """Validate JSON string"""
+    try:
+        json.loads(request.json_string)
+        return JSONValidatorResponse(valid=True)
+    except json.JSONDecodeError as e:
+        return JSONValidatorResponse(
             valid=False,
             error=str(e)
         )
