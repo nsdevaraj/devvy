@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -703,7 +704,6 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         from google.protobuf.message_factory import MessageFactory
         from google.protobuf import json_format
         import tempfile
-        import subprocess
         import os as os_module
         
         # Save proto content to a temporary file
@@ -714,17 +714,21 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         # Compile the proto file to get descriptor
         descriptor_set_file = proto_file_path + '.desc'
         proto_dir = os_module.path.dirname(proto_file_path)
-        compile_result = subprocess.run(
-            ['protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}', 
-             f'--include_imports', proto_file_path],
-            capture_output=True,
-            text=True
+        process = await asyncio.create_subprocess_exec(
+            'protoc',
+            f'--proto_path={proto_dir}',
+            f'--descriptor_set_out={descriptor_set_file}',
+            '--include_imports',
+            proto_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await process.communicate()
         
-        if compile_result.returncode != 0:
+        if process.returncode != 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Failed to compile proto file: {compile_result.stderr}"
+                detail=f"Failed to compile proto file: {stderr.decode()}"
             )
         
         # Load the descriptor
