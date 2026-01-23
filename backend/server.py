@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 import os
+import sys
 import asyncio
 import logging
 from pathlib import Path
@@ -118,7 +119,7 @@ class FavoriteTool(BaseModel):
 # ========== AUTHENTICATION ROUTES ==========
 
 @api_router.post("/auth/register", response_model=Token)
-async def register(user_data: UserCreate):
+async def register(user_data: UserCreate, db=Depends(get_database)):
     # Check if user already exists
     existing_user = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing_user:
@@ -179,7 +180,7 @@ async def register(user_data: UserCreate):
     )
 
 @api_router.post("/auth/login", response_model=Token)
-async def login(credentials: UserLogin):
+async def login(credentials: UserLogin, db=Depends(get_database)):
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -709,7 +710,7 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         import grpc
         from google.protobuf import descriptor_pb2
         from google.protobuf.descriptor_pool import DescriptorPool
-        from google.protobuf.message_factory import MessageFactory
+        from google.protobuf import message_factory
         from google.protobuf import json_format
         import tempfile
         import os as os_module
@@ -722,6 +723,11 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         # Compile the proto file to get descriptor
         descriptor_set_file = proto_file_path + '.desc'
         proto_dir = os_module.path.dirname(proto_file_path)
+        compile_result = subprocess.run(
+            [sys.executable, '-m', 'grpc_tools.protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}',
+             f'--include_imports', proto_file_path],
+            capture_output=True,
+            text=True
         process = await asyncio.create_subprocess_exec(
             'protoc',
             f'--proto_path={proto_dir}',
@@ -753,15 +759,14 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         for file_descriptor_proto in descriptor_set.file:
             pool.Add(file_descriptor_proto)
         
-        # Create a message factory
-        factory = MessageFactory(pool)
-        
         # Find the service and method descriptors
         service_descriptor = None
+        package_name = ""
         for file_descriptor_proto in descriptor_set.file:
             for service in file_descriptor_proto.service:
                 if service.name == request.service:
                     service_descriptor = service
+                    package_name = file_descriptor_proto.package
                     break
             if service_descriptor:
                 break
@@ -784,34 +789,33 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         response_type = pool.FindMessageTypeByName(method_descriptor.output_type.lstrip('.'))
         
         # Create message instances
-        request_message_class = factory.GetPrototype(request_type)
-        response_message_class = factory.GetPrototype(response_type)
+        request_message_class = message_factory.GetMessageClass(request_type)
+        response_message_class = message_factory.GetMessageClass(response_type)
         
         # Convert JSON request to protobuf message
         request_message = json_format.ParseDict(request.request, request_message_class())
         
         # Create gRPC channel and make the call
-        channel = grpc.insecure_channel(request.server_url)
-        
-        # Prepare metadata
-        metadata_list = [(k, v) for k, v in request.metadata.items()]
-        
-        # Make the unary-unary call
-        method_full_name = f'/{service_descriptor.full_name}/{request.method}'
-        response = channel.unary_unary(
-            method_full_name,
-            request_serializer=lambda x: x.SerializeToString(),
-            response_deserializer=response_message_class.FromString,
-        )(request_message, metadata=metadata_list, timeout=30)
-        
-        # Convert response to dict
-        response_dict = json_format.MessageToDict(response, preserving_proto_field_name=True)
+        async with grpc.aio.insecure_channel(request.server_url) as channel:
+            # Prepare metadata
+            metadata_list = [(k, v) for k, v in request.metadata.items()]
+
+            # Make the unary-unary call
+            full_service_name = f"{package_name}.{service_descriptor.name}" if package_name else service_descriptor.name
+            method_full_name = f'/{full_service_name}/{request.method}'
+
+            response = await channel.unary_unary(
+                method_full_name,
+                request_serializer=lambda x: x.SerializeToString(),
+                response_deserializer=response_message_class.FromString,
+            )(request_message, metadata=metadata_list, timeout=30)
+
+            # Convert response to dict
+            response_dict = json_format.MessageToDict(response, preserving_proto_field_name=True)
         
         # Clean up temporary files
         os.unlink(proto_file_path)
         os.unlink(descriptor_set_file)
-        
-        channel.close()
         
         return {
             "response": response_dict,
