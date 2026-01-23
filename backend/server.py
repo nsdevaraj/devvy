@@ -17,6 +17,7 @@ from auth import (
     Folder, FolderCreate, SavedItem, SavedItemCreate
 )
 from db_service import get_db
+from database import DatabaseBase
 
 
 ROOT_DIR = Path(__file__).parent
@@ -585,26 +586,25 @@ async def root():
     return {"message": "Developer Productivity Suite API"}
 
 @api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
+async def create_status_check(input: StatusCheckCreate, db: DatabaseBase = Depends(get_database)):
     status_dict = input.model_dump()
     status_obj = StatusCheck(**status_dict)
     
-    # Convert to dict and serialize datetime to ISO string for MongoDB
+    # Convert to dict and store datetime natively
     doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
+    # No need to convert timestamp to isoformat string, store as native Date
     
     _ = await db.status_checks.insert_one(doc)
     return status_obj
 
 @api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
+async def get_status_checks(db: DatabaseBase = Depends(get_database)):
     # Exclude MongoDB's _id field from the query results
     status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
     
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
+    # Pydantic V2 will automatically handle parsing of strings to datetime if necessary
+    # (legacy data support), and pass through native datetime objects efficiently.
+    # The manual conversion loop is removed for performance.
     
     return status_checks
 
