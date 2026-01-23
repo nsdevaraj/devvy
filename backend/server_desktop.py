@@ -13,6 +13,7 @@ import uuid
 import json
 import os
 import sqlite3
+import aiosqlite
 from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
@@ -180,12 +181,13 @@ class JSONBeautifyResponse(BaseModel):
 @app.get("/api/license/status", response_model=LicenseStatus)
 async def get_license_status():
     """Get current license status"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT license_type, is_activated, machine_id, activation_key FROM app_license LIMIT 1")
-    result = cursor.fetchone()
-    conn.close()
+    async with aiosqlite.connect(DB_PATH) as conn:
+        query = (
+            "SELECT license_type, is_activated, machine_id, activation_key "
+            "FROM app_license LIMIT 1"
+        )
+        async with conn.execute(query) as cursor:
+            result = await cursor.fetchone()
     
     if result:
         return LicenseStatus(
