@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 import os
 import logging
 from pathlib import Path
@@ -726,9 +727,13 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
             )
         
         # Load the descriptor
-        with open(descriptor_set_file, 'rb') as f:
-            descriptor_set = descriptor_pb2.FileDescriptorSet()
-            descriptor_set.ParseFromString(f.read())
+        def load_descriptor_set():
+            with open(descriptor_set_file, 'rb') as f:
+                descriptor_set = descriptor_pb2.FileDescriptorSet()
+                descriptor_set.ParseFromString(f.read())
+            return descriptor_set
+
+        descriptor_set = await run_in_threadpool(load_descriptor_set)
         
         # Create a descriptor pool and register the descriptors
         pool = DescriptorPool()
