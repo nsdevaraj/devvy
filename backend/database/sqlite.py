@@ -3,7 +3,7 @@ SQLite implementation for desktop app mode.
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete, update, DateTime, func
 from typing import List, Optional, Dict, Any
 from .base import DatabaseBase
 from .models_sqlite import Base, User, Organization, ToolConfig, Collection, Folder, SavedItem, Favorite
@@ -45,11 +45,29 @@ class SQLiteDatabase(DatabaseBase):
             else:
                 result[column.name] = value
         return result
+
+    def _fix_datetime_fields(self, model_class, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert ISO strings to datetime objects for DateTime columns"""
+        result = data.copy()
+        for column in model_class.__table__.columns:
+            if isinstance(column.type, DateTime) and column.name in result:
+                val = result[column.name]
+                if isinstance(val, str):
+                    try:
+                        result[column.name] = datetime.fromisoformat(val)
+                    except ValueError:
+                        pass
+        return result
     
     # User operations
     async def create_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
         async with self.SessionLocal() as session:
-            user = User(**user_data)
+            # Filter user_data keys to match User columns
+            valid_keys = User.__table__.columns.keys()
+            filtered_data = {k: v for k, v in user_data.items() if k in valid_keys}
+            filtered_data = self._fix_datetime_fields(User, filtered_data)
+
+            user = User(**filtered_data)
             session.add(user)
             await session.commit()
             await session.refresh(user)
@@ -69,7 +87,16 @@ class SQLiteDatabase(DatabaseBase):
     # Organization operations
     async def create_organization(self, org_data: Dict[str, Any]) -> Dict[str, Any]:
         async with self.SessionLocal() as session:
-            org = Organization(**org_data)
+            # Filter org_data keys to match Organization columns
+            valid_keys = Organization.__table__.columns.keys()
+            filtered_data = {k: v for k, v in org_data.items() if k in valid_keys}
+            filtered_data = self._fix_datetime_fields(Organization, filtered_data)
+
+            # Map max_licenses to license_count if needed
+            if 'max_licenses' in org_data and 'license_count' not in filtered_data:
+                 filtered_data['license_count'] = org_data['max_licenses']
+
+            org = Organization(**filtered_data)
             session.add(org)
             await session.commit()
             await session.refresh(org)
@@ -78,7 +105,21 @@ class SQLiteDatabase(DatabaseBase):
     async def get_organization(self, org_id: str) -> Optional[Dict[str, Any]]:
         async with self.SessionLocal() as session:
             org = await session.get(Organization, org_id)
-            return self._model_to_dict(org) if org else None
+            if not org:
+                return None
+
+            # Count users for active_licenses
+            result = await session.execute(select(func.count(User.id)).where(User.organization_id == org_id))
+            count = result.scalar()
+
+            data = self._model_to_dict(org)
+            data['max_licenses'] = data.get('license_count', 1)
+            data['active_licenses'] = count
+            return data
+
+    async def increment_org_licenses(self, org_id: str) -> bool:
+        # SQLite implementation calculates active licenses dynamically, so no need to increment counter
+        return True
     
     async def get_organizations(self) -> List[Dict[str, Any]]:
         async with self.SessionLocal() as session:
@@ -270,6 +311,16 @@ class SQLiteDatabase(DatabaseBase):
             )
             await session.commit()
             return result.rowcount > 0
+
+    async def has_favorite(self, user_id: str, tool_id: str) -> bool:
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(Favorite).where(
+                    Favorite.user_id == user_id,
+                    Favorite.tool_id == tool_id
+                )
+            )
+            return result.scalar_one_or_none() is not None
     
     async def get_favorites(self, user_id: str) -> List[str]:
         async with self.SessionLocal() as session:

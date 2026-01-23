@@ -43,6 +43,13 @@ class MongoDBDatabase(DatabaseBase):
     async def get_organization(self, org_id: str) -> Optional[Dict[str, Any]]:
         return await self.db.organizations.find_one({"id": org_id}, {"_id": 0})
     
+    async def increment_org_licenses(self, org_id: str) -> bool:
+        result = await self.db.organizations.update_one(
+            {"id": org_id},
+            {"$inc": {"active_licenses": 1}}
+        )
+        return result.modified_count > 0
+
     async def get_organizations(self) -> List[Dict[str, Any]]:
         return await self.db.organizations.find({}, {"_id": 0}).to_list(1000)
     
@@ -137,6 +144,10 @@ class MongoDBDatabase(DatabaseBase):
         result = await self.db.favorites.delete_one({"user_id": user_id, "tool_id": tool_id})
         return result.deleted_count > 0
     
+    async def has_favorite(self, user_id: str, tool_id: str) -> bool:
+        result = await self.db.favorites.find_one({"user_id": user_id, "tool_id": tool_id}, {"_id": 1})
+        return result is not None
+
     async def get_favorites(self, user_id: str) -> List[str]:
         favorites = await self.db.favorites.find({"user_id": user_id}, {"_id": 0}).to_list(1000)
         return [fav["tool_id"] for fav in favorites]
