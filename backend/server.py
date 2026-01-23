@@ -2,8 +2,10 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 import os
 import sys
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
@@ -18,6 +20,13 @@ from auth import (
     Folder, FolderCreate, SavedItem, SavedItemCreate
 )
 from db_service import get_db
+import grpc
+from google.protobuf import descriptor_pb2
+from google.protobuf.descriptor_pool import DescriptorPool
+from google.protobuf.message_factory import MessageFactory
+from google.protobuf import json_format
+import tempfile
+import subprocess
 
 
 ROOT_DIR = Path(__file__).parent
@@ -704,7 +713,6 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         from google.protobuf import message_factory
         from google.protobuf import json_format
         import tempfile
-        import subprocess
         import os as os_module
         
         # Save proto content to a temporary file
@@ -720,18 +728,31 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
              f'--include_imports', proto_file_path],
             capture_output=True,
             text=True
+        process = await asyncio.create_subprocess_exec(
+            'protoc',
+            f'--proto_path={proto_dir}',
+            f'--descriptor_set_out={descriptor_set_file}',
+            '--include_imports',
+            proto_file_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, stderr = await process.communicate()
         
-        if compile_result.returncode != 0:
+        if process.returncode != 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Failed to compile proto file: {compile_result.stderr}"
+                detail=f"Failed to compile proto file: {stderr.decode()}"
             )
         
         # Load the descriptor
-        with open(descriptor_set_file, 'rb') as f:
-            descriptor_set = descriptor_pb2.FileDescriptorSet()
-            descriptor_set.ParseFromString(f.read())
+        def load_descriptor_set():
+            with open(descriptor_set_file, 'rb') as f:
+                descriptor_set = descriptor_pb2.FileDescriptorSet()
+                descriptor_set.ParseFromString(f.read())
+            return descriptor_set
+
+        descriptor_set = await run_in_threadpool(load_descriptor_set)
         
         # Create a descriptor pool and register the descriptors
         pool = DescriptorPool()
@@ -793,8 +814,8 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
             response_dict = json_format.MessageToDict(response, preserving_proto_field_name=True)
         
         # Clean up temporary files
-        os_module.unlink(proto_file_path)
-        os_module.unlink(descriptor_set_file)
+        os.unlink(proto_file_path)
+        os.unlink(descriptor_set_file)
         
         return {
             "response": response_dict,
