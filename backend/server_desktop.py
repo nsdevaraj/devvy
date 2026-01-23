@@ -181,8 +181,12 @@ class JSONBeautifyResponse(BaseModel):
 @app.get("/api/license/status", response_model=LicenseStatus)
 async def get_license_status():
     """Get current license status"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT license_type, is_activated, machine_id, activation_key FROM app_license LIMIT 1") as cursor:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        query = (
+            "SELECT license_type, is_activated, machine_id, activation_key "
+            "FROM app_license LIMIT 1"
+        )
+        async with conn.execute(query) as cursor:
             result = await cursor.fetchone()
     
     if result:
