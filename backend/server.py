@@ -406,31 +406,32 @@ async def delete_folder(
     
     collection_id = folder.get('collection_id')
 
-    # Fetch all folders in this collection to build the tree
-    all_folders = await db.folders.find(
-        {"collection_id": collection_id, "user_id": user_id},
-        {"_id": 0}
-    ).to_list(10000)
+    # Use MongoDB $graphLookup to efficiently find all descendants
+    pipeline = [
+        {"$match": {"id": folder_id, "user_id": user_id}},
+        {
+            "$graphLookup": {
+                "from": "folders",
+                "startWith": "$id",
+                "connectFromField": "id",
+                "connectToField": "parent_folder_id",
+                "as": "descendants",
+                "restrictSearchWithMatch": {"user_id": user_id}
+            }
+        },
+        {"$project": {"id": 1, "descendants.id": 1}}
+    ]
 
-    # Build parent -> children map
-    children_map = {}
-    for f in all_folders:
-        pid = f.get('parent_folder_id')
-        if pid:
-            if pid not in children_map:
-                children_map[pid] = []
-            children_map[pid].append(f['id'])
+    result = await db.folders.aggregate(pipeline).to_list(1)
 
-    # BFS to find all descendants
-    ids_to_delete = [folder_id]
-    queue = [folder_id]
-
-    while queue:
-        current_id = queue.pop(0)
-        if current_id in children_map:
-            children = children_map[current_id]
-            ids_to_delete.extend(children)
-            queue.extend(children)
+    if not result:
+        # Should not happen since we checked existence, but safe fallback
+        ids_to_delete = [folder_id]
+    else:
+        # Collect all IDs to delete (folder itself + descendants)
+        ids_to_delete = [folder_id]
+        for descendant in result[0].get("descendants", []):
+            ids_to_delete.append(descendant["id"])
 
     # Delete all saved items in these folders
     await db.saved_items.delete_many({
