@@ -543,10 +543,7 @@ function MainApp() {
                   <JSONBeautifierTool tab={tab} tabs={tabs} setTabs={setTabs} />
                 )}
                 {tab.id === 'json-validator' && (
-                  <div className="p-8 text-center text-gray-400">
-                    <AlertCircle className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                    <p>JSON Validator - Coming Soon</p>
-                  </div>
+                  <JSONValidatorTool tab={tab} tabs={tabs} setTabs={setTabs} />
                 )}
                 {tab.id === 'api-tester' && (
                   <RestApiTester tab={tab} tabs={tabs} setTabs={setTabs} />
@@ -582,6 +579,111 @@ function MainApp() {
           tab={tabToSave}
         />
       )}
+    </div>
+  );
+}
+
+function JSONValidatorTool({ tab, tabs, setTabs }) {
+  const [inputJSON, setInputJSON] = useState(tab.data.input || '');
+  const [isValid, setIsValid] = useState(tab.data.isValid !== undefined ? tab.data.isValid : null);
+  const [error, setError] = useState(tab.data.error || null);
+
+  const validateJSON = async () => {
+    if (!inputJSON.trim()) {
+      setIsValid(null);
+      setError(null);
+      return;
+    }
+
+    try {
+      const response = await axios.post(`${API}/validate`, {
+        json_string: inputJSON
+      });
+
+      setIsValid(response.data.valid);
+      setError(response.data.error);
+
+      // Update tab data
+      const updatedTabs = tabs.map(t =>
+        t.tabId === tab.tabId
+          ? { ...t, data: { input: inputJSON, isValid: response.data.valid, error: response.data.error } }
+          : t
+      );
+      setTabs(updatedTabs);
+
+      if (response.data.valid) {
+        toast.success('Valid JSON!');
+      } else {
+        toast.error('Invalid JSON');
+      }
+    } catch (err) {
+      console.error('Validation error:', err);
+      toast.error('Failed to validate JSON');
+    }
+  };
+
+  return (
+    <div className="json-tool" data-testid="json-validator">
+      <div className="json-panel">
+        <div className="panel-header">
+          <h3>Input JSON</h3>
+          <Button
+            onClick={validateJSON}
+            size="sm"
+            data-testid="validate-button"
+          >
+            <Check className="w-4 h-4 mr-2" />
+            Validate
+          </Button>
+        </div>
+        <div className="editor-container">
+          <Editor
+            height="100%"
+            defaultLanguage="json"
+            theme="vs-dark"
+            value={inputJSON}
+            onChange={(value) => setInputJSON(value || '')}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 14,
+              lineNumbers: 'on',
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 2,
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="json-panel">
+        <div className="panel-header">
+          <h3>Validation Result</h3>
+        </div>
+        <div className="p-4 h-full bg-[#1e1e1e] text-white overflow-auto font-mono text-sm">
+          {isValid === true && (
+            <div className="flex flex-col items-center justify-center h-full text-emerald-500">
+              <Check className="w-16 h-16 mb-4" />
+              <p className="text-xl">Valid JSON</p>
+            </div>
+          )}
+          {isValid === false && (
+            <div className="text-red-400">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertCircle className="w-6 h-6" />
+                <span className="text-lg font-semibold">Invalid JSON</span>
+              </div>
+              <div className="bg-red-900/20 p-4 rounded-lg border border-red-900/50 whitespace-pre-wrap break-words">
+                {error}
+              </div>
+            </div>
+          )}
+          {isValid === null && (
+            <div className="flex flex-col items-center justify-center h-full text-gray-500">
+              <p>Enter JSON and click Validate</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
