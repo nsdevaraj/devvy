@@ -1,13 +1,26 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from starlette.concurrency import run_in_threadpool
 import os
 import sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+ROOT_DIR = Path(__file__).parent
+
+# Load environment files based on mode
+env_file = ROOT_DIR / '.env.desktop' if os.environ.get('APP_MODE') == 'desktop' else ROOT_DIR / '.env'
+if env_file.exists():
+    load_dotenv(env_file)
+else:
+    # Fallback to default environment variables for desktop mode
+    if os.environ.get('APP_MODE') == 'desktop':
+        os.environ.setdefault('DATABASE_URL', 'sqlite+aiosqlite:///./devtools.db')
+        os.environ.setdefault('CORS_ORIGINS', '*')
+
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 import asyncio
 import logging
-from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
@@ -28,19 +41,6 @@ from google.protobuf.message_factory import MessageFactory
 from google.protobuf import json_format
 import tempfile
 import subprocess
-
-
-ROOT_DIR = Path(__file__).parent
-
-# Load environment files based on mode
-env_file = ROOT_DIR / '.env.desktop' if os.environ.get('APP_MODE') == 'desktop' else ROOT_DIR / '.env'
-if env_file.exists():
-    load_dotenv(env_file)
-else:
-    # Fallback to default environment variables for desktop mode
-    if os.environ.get('APP_MODE') == 'desktop':
-        os.environ.setdefault('DATABASE_URL', 'sqlite+aiosqlite:///./devtools.db')
-        os.environ.setdefault('CORS_ORIGINS', '*')
 
 # Database will be initialized via dependency injection
 db_instance = None
@@ -722,25 +722,23 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         descriptor_set_file = proto_file_path + '.desc'
         proto_dir = os_module.path.dirname(proto_file_path)
         compile_result = subprocess.run(
-            [sys.executable, '-m', 'grpc_tools.protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}',
-             f'--include_imports', proto_file_path],
+            [
+                sys.executable,
+                '-m',
+                'grpc_tools.protoc',
+                f'--proto_path={proto_dir}',
+                f'--descriptor_set_out={descriptor_set_file}',
+                '--include_imports',
+                proto_file_path
+            ],
             capture_output=True,
             text=True
-        process = await asyncio.create_subprocess_exec(
-            'protoc',
-            f'--proto_path={proto_dir}',
-            f'--descriptor_set_out={descriptor_set_file}',
-            '--include_imports',
-            proto_file_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await process.communicate()
         
-        if process.returncode != 0:
+        if compile_result.returncode != 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Failed to compile proto file: {stderr.decode()}"
+                detail=f"Failed to compile proto file: {compile_result.stderr}"
             )
         
         # Load the descriptor

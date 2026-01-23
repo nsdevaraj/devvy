@@ -7,7 +7,13 @@ import os
 import uuid
 
 # JWT Settings
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    import secrets
+    SECRET_KEY = secrets.token_urlsafe(32)
+    print("WARNING: JWT_SECRET_KEY not set. Using a generated temporary "
+          "secret key. Tokens will be invalid after restart.")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
 
