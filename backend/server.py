@@ -387,34 +387,59 @@ async def update_folder(folder_id: str, updates: FolderCreate, current_user: dic
     return {"message": "Folder updated"}
 
 @api_router.delete("/folders/{folder_id}")
-async def delete_folder(folder_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_folder(
+    folder_id: str,
+    current_user: dict = Depends(get_current_user),
+    db=Depends(get_database)
+):
     """Delete a folder and all its items and subfolders recursively"""
     
-    # Recursive function to delete folder and all descendants
-    async def delete_folder_recursive(fid: str):
-        # Find all subfolders
-        subfolders = await db.folders.find(
-            {"parent_folder_id": fid, "user_id": current_user['id']},
-            {"_id": 0}
-        ).to_list(1000)
-        
-        # Recursively delete subfolders
-        for subfolder in subfolders:
-            await delete_folder_recursive(subfolder['id'])
-        
-        # Delete all saved items in this folder
-        await db.saved_items.delete_many({"folder_id": fid, "user_id": current_user['id']})
-        
-        # Delete the folder itself
-        await db.folders.delete_one({"id": fid, "user_id": current_user['id']})
-    
-    # Check if folder exists
-    folder = await db.folders.find_one({"id": folder_id, "user_id": current_user['id']}, {"_id": 0})
+    user_id = current_user['id']
+
+    # Check if folder exists and get details
+    folder = await db.folders.find_one({"id": folder_id, "user_id": user_id}, {"_id": 0})
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     
-    # Delete recursively
-    await delete_folder_recursive(folder_id)
+    collection_id = folder.get('collection_id')
+
+    # Fetch all folders in this collection to build the tree
+    all_folders = await db.folders.find(
+        {"collection_id": collection_id, "user_id": user_id},
+        {"_id": 0}
+    ).to_list(10000)
+
+    # Build parent -> children map
+    children_map = {}
+    for f in all_folders:
+        pid = f.get('parent_folder_id')
+        if pid:
+            if pid not in children_map:
+                children_map[pid] = []
+            children_map[pid].append(f['id'])
+
+    # BFS to find all descendants
+    ids_to_delete = [folder_id]
+    queue = [folder_id]
+
+    while queue:
+        current_id = queue.pop(0)
+        if current_id in children_map:
+            children = children_map[current_id]
+            ids_to_delete.extend(children)
+            queue.extend(children)
+
+    # Delete all saved items in these folders
+    await db.saved_items.delete_many({
+        "folder_id": {"$in": ids_to_delete},
+        "user_id": user_id
+    })
+
+    # Delete the folders
+    await db.folders.delete_many({
+        "id": {"$in": ids_to_delete},
+        "user_id": user_id
+    })
     
     return {"message": "Folder deleted"}
 
@@ -721,13 +746,8 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         # Compile the proto file to get descriptor
         descriptor_set_file = proto_file_path + '.desc'
         proto_dir = os_module.path.dirname(proto_file_path)
-        compile_result = subprocess.run(
-            [sys.executable, '-m', 'grpc_tools.protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}',
-             f'--include_imports', proto_file_path],
-            capture_output=True,
-            text=True
         process = await asyncio.create_subprocess_exec(
-            'protoc',
+            sys.executable, '-m', 'grpc_tools.protoc',
             f'--proto_path={proto_dir}',
             f'--descriptor_set_out={descriptor_set_file}',
             '--include_imports',
