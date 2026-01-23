@@ -249,7 +249,7 @@ async def validate_license(current_user: dict = Depends(get_current_user)):
     }
 
 @api_router.get("/tools/config")
-async def get_tools_config():
+async def get_tools_config(db=Depends(get_database)):
     """Get configuration of which tools are free/premium"""
     configs = await db.tool_configs.find({}, {"_id": 0}).to_list(100)
     
@@ -263,10 +263,13 @@ async def get_tools_config():
             {"tool_id": "ui-recorder", "tool_name": "UI Automation Recorder", "is_premium": False},
         ]
         
+        docs = []
         for tool_data in default_tools:
             tool_config = ToolConfig(**tool_data)
-            doc = tool_config.model_dump()
-            await db.tool_configs.insert_one(doc)
+            docs.append(tool_config.model_dump())
+
+        if docs:
+            await db.tool_configs.insert_many(docs)
         
         configs = await db.tool_configs.find({}, {"_id": 0}).to_list(100)
     
@@ -721,13 +724,10 @@ async def grpc_call(request: GrpcCallRequest, current_user: dict = Depends(get_c
         # Compile the proto file to get descriptor
         descriptor_set_file = proto_file_path + '.desc'
         proto_dir = os_module.path.dirname(proto_file_path)
-        compile_result = subprocess.run(
-            [sys.executable, '-m', 'grpc_tools.protoc', f'--proto_path={proto_dir}', f'--descriptor_set_out={descriptor_set_file}',
-             f'--include_imports', proto_file_path],
-            capture_output=True,
-            text=True
         process = await asyncio.create_subprocess_exec(
-            'protoc',
+            sys.executable,
+            '-m',
+            'grpc_tools.protoc',
             f'--proto_path={proto_dir}',
             f'--descriptor_set_out={descriptor_set_file}',
             '--include_imports',
