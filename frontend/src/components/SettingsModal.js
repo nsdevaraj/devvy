@@ -43,6 +43,7 @@ const SettingsModal = ({ isOpen, onClose, tabs, setTabs, favorites, setFavorites
           <button
             onClick={onClose}
             className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            aria-label="Close settings"
           >
             <X className="w-5 h-5" />
           </button>
@@ -605,10 +606,18 @@ const ArrayConfig = ({ config, category, onSave }) => {
                   <div className="text-xs text-[var(--text-secondary)]">{item.apiUrl || item.host}</div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { setEditIndex(index); setEditData(item); }} className="p-1 hover:bg-[var(--bg-secondary)] rounded">
+                  <button
+                    onClick={() => { setEditIndex(index); setEditData(item); }}
+                    className="p-1 hover:bg-[var(--bg-secondary)] rounded"
+                    aria-label={`Edit ${item.name || 'item'}`}
+                  >
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button onClick={() => deleteItem(index)} className="p-1 hover:bg-red-500/10 text-red-500 rounded">
+                  <button
+                    onClick={() => deleteItem(index)}
+                    className="p-1 hover:bg-red-500/10 text-red-500 rounded"
+                    aria-label={`Delete ${item.name || 'item'}`}
+                  >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
