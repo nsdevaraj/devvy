@@ -45,7 +45,7 @@ const SettingsModal = ({ isOpen, onClose, tabs, setTabs, favorites, setFavorites
             className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
             aria-label="Close settings"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -611,14 +611,14 @@ const ArrayConfig = ({ config, category, onSave }) => {
                     className="p-1 hover:bg-[var(--bg-secondary)] rounded"
                     aria-label={`Edit ${item.name || 'item'}`}
                   >
-                    <Edit2 className="w-4 h-4" />
+                    <Edit2 className="w-4 h-4" aria-hidden="true" />
                   </button>
                   <button
                     onClick={() => deleteItem(index)}
                     className="p-1 hover:bg-red-500/10 text-red-500 rounded"
                     aria-label={`Delete ${item.name || 'item'}`}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>

@@ -154,7 +154,10 @@ export const flattenPDF = async (
         const concurrency = getConcurrencyLimit();
         let currentIndex = 1;
         let completedCount = 0;
-        const pagesData = new Array(totalPages);
+
+        // Interleaved assembly state to reduce memory usage and pipeline operations
+        let nextPageToAdd = 1;
+        const bufferedPages = new Map();
 
         const worker = async () => {
              let canvas;
@@ -209,7 +212,27 @@ export const flattenPDF = async (
                  const pdfPageHeight = viewport.height / renderScale;
                  const orientation = pdfPageWidth > pdfPageHeight ? 'l' : 'p';
 
-                 pagesData[i - 1] = { imgData, pdfPageWidth, pdfPageHeight, orientation };
+                 // Interleaved Assembly: Add to buffer and flush sequential pages
+                 bufferedPages.set(i, { imgData, pdfPageWidth, pdfPageHeight, orientation });
+
+                 while (bufferedPages.has(nextPageToAdd)) {
+                     const nextData = bufferedPages.get(nextPageToAdd);
+                     const { imgData, pdfPageWidth, pdfPageHeight, orientation } = nextData;
+
+                     if (!pdfDoc) {
+                        pdfDoc = new jsPDF({
+                            orientation: orientation,
+                            unit: 'pt',
+                            format: [pdfPageWidth, pdfPageHeight]
+                        });
+                    } else {
+                        pdfDoc.addPage([pdfPageWidth, pdfPageHeight], orientation);
+                    }
+                    pdfDoc.addImage(imgData, 'JPEG', 0, 0, pdfPageWidth, pdfPageHeight, undefined, 'FAST');
+
+                    bufferedPages.delete(nextPageToAdd);
+                    nextPageToAdd++;
+                 }
 
                  completedCount++;
                  onProgress && onProgress((completedCount / totalPages) * 100);
@@ -218,22 +241,6 @@ export const flattenPDF = async (
 
         // Run workers
         await Promise.all(Array.from({ length: Math.min(concurrency, totalPages) }, worker));
-
-        // Assemble PDF sequentially to ensure order
-        for (const pageData of pagesData) {
-            if (!pageData) continue;
-            const { imgData, pdfPageWidth, pdfPageHeight, orientation } = pageData;
-             if (!pdfDoc) {
-                pdfDoc = new jsPDF({
-                    orientation: orientation,
-                    unit: 'pt',
-                    format: [pdfPageWidth, pdfPageHeight]
-                });
-            } else {
-                pdfDoc.addPage([pdfPageWidth, pdfPageHeight], orientation);
-            }
-            pdfDoc.addImage(imgData, 'JPEG', 0, 0, pdfPageWidth, pdfPageHeight, undefined, 'FAST');
-        }
 
         if (pdfDoc) {
             const blob = pdfDoc.output('blob');

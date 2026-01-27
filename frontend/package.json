@@ -106,6 +106,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "build:tauri": "cross-env REACT_APP_BACKEND_URL=http://127.0.0.1:8001 npm run build",
+    "tauri:build:windows": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build --target x86_64-pc-windows-msvc",
     "tauri:install": "./build-and-install.sh"
   },
   "browserslist": {
@@ -126,6 +127,9 @@
     "@craco/craco": "^7.1.0",
     "@eslint/js": "9.23.0",
     "@tauri-apps/cli": "^2.8.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "autoprefixer": "^10.4.20",
     "cross-env": "^7.0.3",
     "dotenv": "^17.2.3",

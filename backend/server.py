@@ -2021,26 +2021,27 @@ async def upload_s3_object(
 async def list_docker_containers():
     """List all Docker containers"""
     try:
-        import docker
+        def _list_containers():
+            import docker
+            client = docker.from_env()
+            containers = []
+            for container in client.containers.list(all=True):
+                containers.append(
+                    {
+                        "id": container.id,
+                        "name": container.name,
+                        "image": (
+                            container.image.tags[0]
+                            if container.image.tags
+                            else container.image.id[:12]
+                        ),
+                        "state": container.status,
+                        "created": container.attrs["Created"],
+                    }
+                )
+            return containers
 
-        client = docker.from_env()
-
-        containers = []
-        for container in client.containers.list(all=True):
-            containers.append(
-                {
-                    "id": container.id,
-                    "name": container.name,
-                    "image": (
-                        container.image.tags[0]
-                        if container.image.tags
-                        else container.image.id[:12]
-                    ),
-                    "state": container.status,
-                    "created": container.attrs["Created"],
-                }
-            )
-
+        containers = await run_in_threadpool(_list_containers)
         return {"containers": containers}
     except Exception as e:
         logger.error(f"Docker containers list error: {str(e)}")
@@ -2051,16 +2052,17 @@ async def list_docker_containers():
 async def list_docker_images():
     """List all Docker images"""
     try:
-        import docker
+        def _list_images():
+            import docker
+            client = docker.from_env()
+            images = []
+            for image in client.images.list():
+                images.append(
+                    {"id": image.id, "tags": image.tags, "size": image.attrs.get("Size", 0)}
+                )
+            return images
 
-        client = docker.from_env()
-
-        images = []
-        for image in client.images.list():
-            images.append(
-                {"id": image.id, "tags": image.tags, "size": image.attrs.get("Size", 0)}
-            )
-
+        images = await run_in_threadpool(_list_images)
         return {"images": images}
     except Exception as e:
         logger.error(f"Docker images list error: {str(e)}")
@@ -2071,11 +2073,13 @@ async def list_docker_images():
 async def start_docker_container(container_id: str):
     """Start a Docker container"""
     try:
-        import docker
+        def _start_container():
+            import docker
+            client = docker.from_env()
+            container = client.containers.get(container_id)
+            container.start()
 
-        client = docker.from_env()
-        container = client.containers.get(container_id)
-        container.start()
+        await run_in_threadpool(_start_container)
         return {"message": "Container started"}
     except Exception as e:
         logger.error(f"Docker start error: {str(e)}")
@@ -2086,11 +2090,13 @@ async def start_docker_container(container_id: str):
 async def stop_docker_container(container_id: str):
     """Stop a Docker container"""
     try:
-        import docker
+        def _stop_container():
+            import docker
+            client = docker.from_env()
+            container = client.containers.get(container_id)
+            container.stop()
 
-        client = docker.from_env()
-        container = client.containers.get(container_id)
-        container.stop()
+        await run_in_threadpool(_stop_container)
         return {"message": "Container stopped"}
     except Exception as e:
         logger.error(f"Docker stop error: {str(e)}")
@@ -2101,11 +2107,13 @@ async def stop_docker_container(container_id: str):
 async def remove_docker_container(container_id: str):
     """Remove a Docker container"""
     try:
-        import docker
+        def _remove_container():
+            import docker
+            client = docker.from_env()
+            container = client.containers.get(container_id)
+            container.remove(force=True)
 
-        client = docker.from_env()
-        container = client.containers.get(container_id)
-        container.remove(force=True)
+        await run_in_threadpool(_remove_container)
         return {"message": "Container removed"}
     except Exception as e:
         logger.error(f"Docker remove error: {str(e)}")
@@ -2116,11 +2124,13 @@ async def remove_docker_container(container_id: str):
 async def get_docker_logs(container_id: str):
     """Get container logs"""
     try:
-        import docker
+        def _get_logs():
+            import docker
+            client = docker.from_env()
+            container = client.containers.get(container_id)
+            return container.logs(tail=1000).decode("utf-8")
 
-        client = docker.from_env()
-        container = client.containers.get(container_id)
-        logs = container.logs(tail=1000).decode("utf-8")
+        logs = await run_in_threadpool(_get_logs)
         return {"logs": logs}
     except Exception as e:
         logger.error(f"Docker logs error: {str(e)}")
@@ -2131,10 +2141,12 @@ async def get_docker_logs(container_id: str):
 async def remove_docker_image(image_id: str):
     """Remove a Docker image"""
     try:
-        import docker
+        def _remove_image():
+            import docker
+            client = docker.from_env()
+            client.images.remove(image_id, force=True)
 
-        client = docker.from_env()
-        client.images.remove(image_id, force=True)
+        await run_in_threadpool(_remove_image)
         return {"message": "Image removed"}
     except Exception as e:
         logger.error(f"Docker image remove error: {str(e)}")
@@ -2151,27 +2163,30 @@ class DockerBuildRequest(BaseModel):
 async def build_docker_image(request: DockerBuildRequest):
     """Build a Docker image"""
     try:
-        import docker
-        import io
+        def _build_image():
+            import docker
+            import io
+            client = docker.from_env()
 
-        client = docker.from_env()
+            # Create Dockerfile in memory
+            dockerfile_content = request.dockerfile.encode("utf-8")
+            fileobj = io.BytesIO(dockerfile_content)
 
-        # Create Dockerfile in memory
-        dockerfile_content = request.dockerfile.encode("utf-8")
-        fileobj = io.BytesIO(dockerfile_content)
+            # Build image
+            image, build_logs = client.images.build(
+                fileobj=fileobj, tag=request.imageName, rm=True
+            )
 
-        # Build image
-        image, build_logs = client.images.build(
-            fileobj=fileobj, tag=request.imageName, rm=True
-        )
+            # Collect build output
+            output = []
+            for log in build_logs:
+                if "stream" in log:
+                    output.append(log["stream"])
 
-        # Collect build output
-        output = []
-        for log in build_logs:
-            if "stream" in log:
-                output.append(log["stream"])
+            return "".join(output), image.id
 
-        return {"output": "".join(output), "imageId": image.id}
+        output_str, image_id = await run_in_threadpool(_build_image)
+        return {"output": output_str, "imageId": image_id}
     except Exception as e:
         logger.error(f"Docker build error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2185,10 +2200,12 @@ class DockerPullRequest(BaseModel):
 async def pull_docker_image(request: DockerPullRequest):
     """Pull a Docker image"""
     try:
-        import docker
+        def _pull_image():
+            import docker
+            client = docker.from_env()
+            client.images.pull(request.image)
 
-        client = docker.from_env()
-        client.images.pull(request.image)
+        await run_in_threadpool(_pull_image)
         return {"message": "Image pulled"}
     except Exception as e:
         logger.error(f"Docker pull error: {str(e)}")
